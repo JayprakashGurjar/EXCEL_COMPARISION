@@ -15,23 +15,15 @@
     searchQuery: '',
     previewOpenA: false,
     previewOpenB: false,
-    inspectedItem: null // For Side-by-Side Row Inspector Modal
+    inspectedItem: null, // For Side-by-Side Row Inspector Modal
+    inspectedUnmatchedItem: null, // For Unmatched Record Modal
+    inspectedAmbiguousItem: null // For Ambiguous Conflicting Rows Modal
   };
 
   const esc = (s) =>
     String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
   const formatSample = (val) => (val ? ` (e.g. "${esc(val)}")` : '');
-
-  const columnOptions = (headers, samples, selectedVal) => {
-    let html = '<option value="">-- Select Column --</option>';
-    headers.forEach((h) => {
-      const sample = samples && samples[h] ? formatSample(samples[h]) : '';
-      const isSel = h === selectedVal ? ' selected' : '';
-      html += `<option value="${esc(h)}"${isSel}>${esc(h)}${sample}</option>`;
-    });
-    return html;
-  };
 
   const showVal = (v) => {
     if (v instanceof Date) return ECT.normalize(v);
@@ -41,14 +33,59 @@
 
   const msg = (text, ok = false) => {
     const el = $('#msg');
+    if (!el) return;
     if (!text) {
       el.innerHTML = '';
       el.className = '';
       return;
     }
-    el.innerHTML = esc(text);
+    const icon = ok ? '✓' : '⚠️';
+    el.innerHTML = `<span>${icon}</span> <span>${esc(text)}</span>`;
     el.className = ok ? 'alert-box alert-success' : 'alert-box alert-error';
   };
+
+  function updateStepper() {
+    const p1 = $('#step-pill-1');
+    const p2 = $('#step-pill-2');
+    const p3 = $('#step-pill-3');
+    const guide = $('#quick-guide-banner');
+
+    const filesLoaded = (S.a?.table ? 1 : 0) + (S.b?.table ? 1 : 0);
+
+    if (p1 && p2 && p3) {
+      if (filesLoaded === 2) {
+        p1.className = 'step-pill step-done';
+        p1.innerHTML = '✓ 1. Files Uploaded (2/2)';
+      } else if (filesLoaded === 1) {
+        p1.className = 'step-pill step-active';
+        p1.innerHTML = '1. Upload Files (1/2)';
+      } else {
+        p1.className = 'step-pill step-active';
+        p1.innerHTML = '1. Upload Files';
+      }
+
+      if (S.res) {
+        p2.className = 'step-pill step-done';
+        p2.innerHTML = '✓ 2. Columns Mapped';
+        p3.className = 'step-pill step-active';
+        p3.innerHTML = '3. Visual Diff Analysis';
+      } else if (filesLoaded === 2) {
+        p2.className = 'step-pill step-active';
+        p2.innerHTML = '2. Map Columns';
+        p3.className = 'step-pill';
+        p3.innerHTML = '3. Visual Diff Analysis';
+      } else {
+        p2.className = 'step-pill';
+        p2.innerHTML = '2. Map Columns';
+        p3.className = 'step-pill';
+        p3.innerHTML = '3. Visual Diff Analysis';
+      }
+    }
+
+    if (guide) {
+      guide.style.display = filesLoaded === 2 ? 'none' : 'flex';
+    }
+  }
 
   // Fuzzy & Normalized Column Matching
   function findBestMatch(colA, headersB) {
@@ -105,7 +142,7 @@
   async function loadFile(side, file) {
     if (!file) return;
     try {
-      msg(`Reading ${file.name}...`);
+      msg(`Reading file ${file.name}...`);
       const wb = await ECT.excel.read(file);
       S[side] = {
         name: file.name,
@@ -170,10 +207,15 @@
   function renderFileInfo(side) {
     const f = S[side];
     const container = $(`#info-${side}`);
+    const dropArea = $(`#drop-area-${side}`);
+
     if (!f) {
-      container.innerHTML = `<div class="empty-file-slot">No file uploaded. Select an Excel (.xlsx, .xls, .xlsm, .csv) file above.</div>`;
+      if (dropArea) dropArea.style.display = 'block';
+      if (container) container.innerHTML = '';
       return;
     }
+
+    if (dropArea) dropArea.style.display = 'none';
 
     const t = f.table;
     const sheetOptions = f.wb.SheetNames.map(
@@ -185,7 +227,7 @@
         const isCurrent = p.rowIndex === t.headerRow;
         const isAuto = p.rowIndex === t.autoDetectedHeader;
         let badge = isCurrent ? ' active-header-pill' : '';
-        let label = `Row ${p.excelRowNumber}${isAuto ? ' ★' : ''}`;
+        let label = `Row ${p.excelRowNumber}${isAuto ? ' ⭐' : ''}`;
         return `<button type="button" class="header-pill${badge}" data-set-header="${side}" data-row="${p.rowIndex}" title="Set Row ${p.excelRowNumber} as Header">${label}</button>`;
       })
       .join('');
@@ -236,17 +278,26 @@
     container.innerHTML = `
       <div class="file-card-details">
         <div class="file-title-row">
-          <span class="file-name-tag">📄 <b>${esc(f.name)}</b> (${f.size})</span>
-          <div class="sheet-select-wrapper">
-            <label>Sheet:</label>
-            <select data-sheet="${side}" aria-label="Select Sheet">${sheetOptions}</select>
+          <span class="file-name-tag">
+            <span>📄</span>
+            <b title="${esc(f.name)}">${esc(f.name)}</b>
+            <span class="file-size-badge">${f.size}</span>
+          </span>
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <div class="sheet-select-wrapper">
+              <label>Sheet:</label>
+              <select data-sheet="${side}" aria-label="Select Sheet">${sheetOptions}</select>
+            </div>
+            <button type="button" class="btn-replace-file" data-trigger-upload="${side}" title="Upload a different file">
+              Replace File
+            </button>
           </div>
         </div>
 
         <div class="header-detection-bar">
           <div class="header-detection-title">
-            <span><b>Header Row:</b> Row ${t.headerRow + 1} ${t.headerRow === t.autoDetectedHeader ? '<span class="badge badge-info">Auto-detected</span>' : '<span class="badge badge-warn">User Selected</span>'}</span>
-            <span class="muted-note">Pick another row if headers start elsewhere:</span>
+            <span><b>Header Row:</b> Row ${t.headerRow + 1} ${t.headerRow === t.autoDetectedHeader ? '<span class="badge badge-info">Auto-detected ⭐</span>' : '<span class="badge badge-warning">User Selected</span>'}</span>
+            <span class="muted-note">Click a row pill below if headers begin on a different row:</span>
           </div>
           <div class="header-pills-list">${headerRowButtons}</div>
         </div>
@@ -262,7 +313,7 @@
         ${previewHtml}
 
         <div class="columns-detected-drawer">
-          <div class="drawer-header">All Identified Columns in File ${side.toUpperCase()} (${t.headers.length}):</div>
+          <div class="drawer-header">Identified Columns in File ${side.toUpperCase()} (${t.headers.length}):</div>
           <div class="col-chips-container">${colChips || '<span class="muted">No columns detected</span>'}</div>
         </div>
       </div>
@@ -346,7 +397,7 @@
     const samplesB = S.b?.table?.samples || {};
 
     if (!S.fields.length) {
-      $('#fields-container').innerHTML = `<div class="empty-fields-note">No comparison columns mapped yet. Click <b>"Smart Auto-Map"</b> or <b>"Add Column Pair"</b>.</div>`;
+      $('#fields-container').innerHTML = `<div class="empty-fields-note" style="padding: 14px; color: #64748b; font-size: 13px;">No comparison columns mapped yet. Click <b>"Smart Auto-Map Columns"</b> or <b>"Add Column Pair"</b>.</div>`;
       return;
     }
 
@@ -383,6 +434,7 @@
       renderFieldPairs();
     }
     renderResults();
+    updateStepper();
   }
 
   // Generate Side-by-Side Excel Row Grid with Glowing Diff Highlighting
@@ -414,7 +466,7 @@
           if (isDiff) {
             return `
               <td class="diff-cell diff-cell-a" title="File A: ${esc(val)}">
-                <span class="diff-marker-tag marker-a">OLD</span>
+                <span class="diff-marker-tag marker-a">FILE A</span>
                 <span class="diff-cell-val">${showVal(val)}</span>
               </td>
             `;
@@ -431,7 +483,7 @@
           if (isDiff) {
             return `
               <td class="diff-cell diff-cell-b" title="File B: ${esc(val)}">
-                <span class="diff-marker-tag marker-b">NEW</span>
+                <span class="diff-marker-tag marker-b">FILE B</span>
                 <span class="diff-cell-val">${showVal(val)}</span>
               </td>
             `;
@@ -503,7 +555,7 @@
         const keyCell = isFirst
           ? `<td rowspan="${rowspan}" class="sticky-key-cell">
               <div class="key-val-title">🔑 <b>${esc(item.key)}</b></div>
-              <div class="diff-count-badge">⚠️ ${rowspan} Column Differences</div>
+              <div class="diff-count-badge">⚠️ ${rowspan} Column ${rowspan === 1 ? 'Difference' : 'Differences'}</div>
               <button type="button" class="btn-inspect-row" data-inspect-item="${itemIdx}">🔍 Compare Row</button>
             </td>
             <td rowspan="${rowspan}">
@@ -559,6 +611,9 @@
 
   // Side-by-Side Detailed Modal for a Single Record
   function renderInspectorModal() {
+    const hasModal = !!(S.inspectedItem || S.inspectedUnmatchedItem || S.inspectedAmbiguousItem);
+    document.body.style.overflow = hasModal ? 'hidden' : '';
+
     // 1. Ambiguous Duplicate Inspector Modal
     if (S.inspectedAmbiguousItem) {
       const amb = S.inspectedAmbiguousItem;
@@ -568,36 +623,36 @@
       const rowsAHtml = amb.a
         .map((r) => {
           const cells = colsA.map((c) => `<td>${showVal(r.data[c])}</td>`).join('');
-          return `<tr><td><span class="row-badge">Row ${r.row}</span></td>${cells}</tr>`;
+          return `<tr><td><span class="badge badge-info">Row ${r.row}</span></td>${cells}</tr>`;
         })
         .join('');
 
       const rowsBHtml = amb.b
         .map((r) => {
           const cells = colsB.map((c) => `<td>${showVal(r.data[c])}</td>`).join('');
-          return `<tr><td><span class="row-badge">Row ${r.row}</span></td>${cells}</tr>`;
+          return `<tr><td><span class="badge badge-purple">Row ${r.row}</span></td>${cells}</tr>`;
         })
         .join('');
 
       return `
         <div class="modal-backdrop" data-action="close-modal">
-          <div class="modal-card" style="max-width: 1050px;" onclick="event.stopPropagation()">
+          <div class="modal-card" style="max-width: 1100px;" onclick="event.stopPropagation()">
             <div class="modal-header">
               <div>
                 <h3 style="margin: 0; font-size: 18px; color: #b45309;">⚠️ Conflicting Repeated Rows for Key: "${esc(amb.key)}"</h3>
                 <div style="font-size: 13px; color: #64748b; margin-top: 4px;">
-                  This Key appears <b>${amb.a.length} times in File A</b> and <b>${amb.b.length} times in File B</b> with different row values.
+                  This Key appears <b>${amb.a.length} times in File A</b> and <b>${amb.b.length} times in File B</b> with differing row data.
                 </div>
               </div>
               <button type="button" class="btn-close-modal" data-action="close-modal">✕</button>
             </div>
 
             <div style="background: #fffbeb; border: 1px solid #fde68a; border-radius: 8px; padding: 14px 18px; margin-bottom: 16px; font-size: 13px; color: #92400e; line-height: 1.6;">
-              <b>🤔 What is this issue?</b> The key value <b>"${esc(amb.key)}"</b> appears ${amb.a.length} times in File A and ${amb.b.length} times in File B with conflicting data across other columns. Pairing them arbitrarily would be pure guesswork (force-matching) and corrupt comparison accuracy.<br>
-              💡 <b>Recommended Solution:</b> Review the tables below to identify which column distinguishes these rows (such as <code>Date</code>, <code>Item Name</code>, <code>Type</code>, or <code>Invoice ID</code>). Then go to Step 1 (Match Key) and click <b>"+ Add Composite Key Column"</b> to add that column so each row becomes uniquely identifiable!
+              <b>🤔 What is the Issue?</b> The selected Match Key contains duplicate values across both files. For instance, the exact same Key appears ${amb.a.length} times in File A and ${amb.b.length} times in File B, but the rest of the row data (such as Date, Amount, or Product) differs across those rows. The system cannot guess or force-match rows arbitrarily without compromising data integrity.<br>
+              💡 <b>Recommended Solution:</b> Review the tables below to identify which column distinguishes these rows (such as <code>Date</code>, <code>Item Name</code>, <code>Type</code>, or <code>Invoice ID</code>). Then go to Step 1 (Match Key) above and click <b>"+ Add Composite Key Column"</b> to add that column so each row becomes uniquely identifiable!
             </div>
 
-            <h4 style="margin: 14px 0 6px; font-size: 14px; color: #1e3a8a;">
+            <h4 style="margin: 14px 0 8px; font-size: 14px; color: #1e3a8a;">
               📄 File A ("${esc(S.a.name)}") — ${amb.a.length} Rows with Key "${esc(amb.key)}":
             </h4>
             <div class="scroll-table-wrapper mini-scroll" style="max-height: 220px; margin-bottom: 18px;">
@@ -607,7 +662,7 @@
               </table>
             </div>
 
-            <h4 style="margin: 14px 0 6px; font-size: 14px; color: #1e3a8a;">
+            <h4 style="margin: 14px 0 8px; font-size: 14px; color: #1e3a8a;">
               📄 File B ("${esc(S.b.name)}") — ${amb.b.length} Rows with Key "${esc(amb.key)}":
             </h4>
             <div class="scroll-table-wrapper mini-scroll" style="max-height: 220px;">
@@ -617,7 +672,7 @@
               </table>
             </div>
 
-            <div style="margin-top: 18px; text-align: right;">
+            <div style="margin-top: 20px; text-align: right;">
               <button type="button" class="btn-secondary" data-action="close-modal">Close Window</button>
             </div>
           </div>
@@ -635,7 +690,7 @@
           const keyBadge = isKeyCol ? '<span class="badge badge-purple" style="margin-left: 6px;">🔑 Match Key</span>' : '';
           return `
             <tr ${trStyle}>
-              <td style="width: 250px;"><b>${esc(col)}</b> ${keyBadge}</td>
+              <td style="width: 260px;"><b>${esc(col)}</b> ${keyBadge}</td>
               <td>${showVal(u.data[col])}</td>
             </tr>
           `;
@@ -645,7 +700,7 @@
       let nearMatchBox = '';
       if (u.nearMatch) {
         nearMatchBox = `
-          <div style="background: #fefce8; border: 1px solid #fef08a; border-radius: 6px; padding: 10px 14px; margin-bottom: 12px; font-size: 13px; color: #854d0e;">
+          <div style="background: #fefce8; border: 1px solid #fef08a; border-radius: 6px; padding: 12px 16px; margin-bottom: 14px; font-size: 13px; color: #854d0e;">
             💡 <b>Possible Near-Match in File ${u.side === 'a' ? 'B' : 'A'}:</b> Key value <b>"${esc(u.nearMatch.key)}"</b> exists at Row ${u.nearMatch.row}. Please check for trailing spaces, uppercase/lowercase, or formatting differences.
           </div>
         `;
@@ -663,7 +718,7 @@
               </div>
               <button type="button" class="btn-close-modal" data-action="close-modal">✕</button>
             </div>
-            <div style="background: #fee2e2; border: 1px solid #fca5a5; border-radius: 6px; padding: 10px 14px; margin-bottom: 14px; font-size: 13px; color: #991b1b;">
+            <div style="background: #fee2e2; border: 1px solid #fca5a5; border-radius: 6px; padding: 12px 16px; margin-bottom: 14px; font-size: 13px; color: #991b1b;">
               <b>Search Result:</b> Key value <b>"${esc(u.key)}"</b> (from column <b>"${esc(u.keyCols)}"</b>) was <b>NOT FOUND</b> anywhere in <b>"${esc(u.otherFileName)}"</b>.
             </div>
             ${nearMatchBox}
@@ -673,7 +728,7 @@
                 <tbody>${rowsHtml}</tbody>
               </table>
             </div>
-            <div style="margin-top: 16px; text-align: right;">
+            <div style="margin-top: 18px; text-align: right;">
               <button type="button" class="btn-secondary" data-action="close-modal">Close</button>
             </div>
           </div>
@@ -723,8 +778,8 @@
             <button type="button" class="btn-close-modal" data-action="close-modal">✕</button>
           </div>
           <div class="modal-summary-bar">
-            <span class="badge badge-danger">⚠️ ${diffCount} Columns Differ</span>
-            <span class="badge badge-success">✓ ${matchCount} Columns Match</span>
+            <span class="badge badge-danger">⚠️ ${diffCount} ${diffCount === 1 ? 'Column Differs' : 'Columns Differ'}</span>
+            <span class="badge badge-success">✓ ${matchCount} ${matchCount === 1 ? 'Column Matches' : 'Columns Match'}</span>
           </div>
           <div class="scroll-table-wrapper" style="max-height: 450px;">
             <table class="data-table">
@@ -739,7 +794,7 @@
               <tbody>${rowsHtml}</tbody>
             </table>
           </div>
-          <div style="margin-top: 16px; text-align: right;">
+          <div style="margin-top: 18px; text-align: right;">
             <button type="button" class="btn-secondary" data-action="close-modal">Close</button>
           </div>
         </div>
@@ -880,8 +935,8 @@
           return `
             <tr>
               <td><b class="key-display">🔑 ${esc(item.key)}</b></td>
-              <td><span class="row-badge">Row ${item.a[0].row}</span></td>
-              <td><span class="row-badge">Row ${item.b[0].row}</span></td>
+              <td><span class="badge badge-info">Row ${item.a[0].row}</span></td>
+              <td><span class="badge badge-purple">Row ${item.b[0].row}</span></td>
               ${cells}
             </tr>
           `;
@@ -986,7 +1041,7 @@
 
           return `
             <tr>
-              <td><span class="row-badge">Row ${item.row}</span></td>
+              <td><span class="badge badge-info">Row ${item.row}</span></td>
               <td class="missing-key-cell">
                 ${keyDisplayHtml}
                 <div class="key-col-subtitle">Column: <b>${esc(item.keyCols)}</b></div>
@@ -1030,8 +1085,8 @@
               <b>${totalItemsCount} Ambiguous Key Groups (Multiple Conflicting Rows Found)</b>
             </div>
             <div style="font-size: 13px; color: #78350f; margin-top: 6px; line-height: 1.6;">
-              <b>🤔 What is this issue?</b> The selected Match Key contains duplicate values across both files. For instance, the same key appears 5 times in File A and 5 times in File B, but the rest of the column data differs across these rows. The engine does not guess or force-match rows arbitrarily to preserve 100% data integrity.<br>
-              💡 <b>Recommended Solution:</b> Click <b>"🔍 Inspect All Rows"</b> on any item below to compare the rows side-by-side. Then navigate to <b>Step 1 (Match Key)</b> and click <b>"+ Add Composite Key Column"</b> (e.g., Date, Product, or Invoice No) to distinguish each record uniquely!
+              <b>🤔 What is the Issue?</b> The selected Match Key contains duplicate values across both files. For instance, the exact same Key appears multiple times in File A and File B, but the rest of the row data (such as Date, Amount, or Product) differs between those rows. The system cannot guess or force-match rows arbitrarily without compromising data integrity.<br>
+              💡 <b>Recommended Solution:</b> Click <b>"🔍 Inspect Conflicting Rows"</b> next to any record below to see what differs across those rows. Then, navigate to <b>Step 1 (Match Key)</b> above and click <b>"+ Add Composite Key Column"</b> (e.g., Date, Product, or Invoice No.) so that each row becomes uniquely identifiable!
             </div>
           </div>
         </div>
@@ -1059,7 +1114,7 @@
             </td>
             <td>
               <button type="button" class="btn-inspect-row" data-inspect-ambiguous="${idx}">
-                🔍 Inspect All ${item.a.length + item.b.length} Rows
+                🔍 Inspect Conflicting Rows (${item.a.length + item.b.length} Rows)
               </button>
             </td>
           </tr>
@@ -1134,7 +1189,9 @@
 
     box.innerHTML = `
       <div class="results-container">
-        <h2>Comparison Results & Visual Diff Analysis</h2>
+        <h2 style="font-size: 18px; font-weight: 700; margin-bottom: 16px; color: #0f172a;">
+          Comparison Results & Visual Diff Analysis
+        </h2>
         ${integrityAuditHtml}
 
         <div class="metric-cards-grid">${cardsHtml}</div>
@@ -1183,7 +1240,7 @@
 
     try {
       S.res = ECT.engine.compare(S.a.table, S.b.table, cfg);
-      msg('✓ Comparison completed successfully!', true);
+      msg('Comparison completed successfully!', true);
 
       if (S.res.mismatched.length) S.tab = 'mismatched';
       else if (S.res.unmatched.length) S.tab = 'unmatched-a';
@@ -1191,6 +1248,13 @@
       else S.tab = 'matched';
 
       renderResults();
+      updateStepper();
+
+      // Smooth scroll to results
+      setTimeout(() => {
+        const resEl = $('#results-section');
+        if (resEl) resEl.scrollIntoView({ behavior: 'smooth' });
+      }, 50);
     } catch (e) {
       msg(`Comparison error: ${e.message}`);
     }
@@ -1239,6 +1303,65 @@
     }
   }
 
+  function resetAll() {
+    S.a = null;
+    S.b = null;
+    S.keys = [{ a: '', b: '' }];
+    S.fields = [];
+    S.res = null;
+    S.tab = 'mismatched';
+    S.diffViewMode = 'grid';
+    S.filterDiffColumn = 'all';
+    S.searchQuery = '';
+    S.previewOpenA = false;
+    S.previewOpenB = false;
+    S.inspectedItem = null;
+    S.inspectedUnmatchedItem = null;
+    S.inspectedAmbiguousItem = null;
+
+    const fileInputA = $('#file-input-a');
+    const fileInputB = $('#file-input-b');
+    if (fileInputA) fileInputA.value = '';
+    if (fileInputB) fileInputB.value = '';
+
+    msg('');
+    render();
+  }
+
+  // Setup Drag-and-Drop file uploads
+  function setupDragAndDrop() {
+    ['a', 'b'].forEach((side) => {
+      const card = $(`#card-upload-${side}`);
+      const dropArea = $(`#drop-area-${side}`);
+      if (!card || !dropArea) return;
+
+      ['dragenter', 'dragover'].forEach((eventName) => {
+        card.addEventListener(eventName, (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          card.classList.add('drag-over');
+          dropArea.classList.add('drag-over');
+        });
+      });
+
+      ['dragleave', 'drop'].forEach((eventName) => {
+        card.addEventListener(eventName, (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          card.classList.remove('drag-over');
+          dropArea.classList.remove('drag-over');
+        });
+      });
+
+      card.addEventListener('drop', (e) => {
+        const files = e.dataTransfer.files;
+        if (files && files.length) {
+          loadFile(side, files[0]);
+        }
+      });
+    });
+  }
+
   // Event Listeners
   document.addEventListener('input', (e) => {
     if (e.target.classList.contains('select2-search-input')) {
@@ -1250,15 +1373,31 @@
   });
 
   document.addEventListener('keydown', (e) => {
+    // 1. Escape key handling
+    if (e.key === 'Escape') {
+      const openWrapper = $('.select2-wrapper.select2-open');
+      if (openWrapper) {
+        closeAllSelect2();
+        e.preventDefault();
+        return;
+      }
+      if (S.inspectedItem || S.inspectedUnmatchedItem || S.inspectedAmbiguousItem) {
+        S.inspectedItem = null;
+        S.inspectedUnmatchedItem = null;
+        S.inspectedAmbiguousItem = null;
+        renderResults();
+        e.preventDefault();
+        return;
+      }
+    }
+
+    // 2. Select2 Keyboard Navigation
     const openWrapper = $('.select2-wrapper.select2-open');
     if (!openWrapper) return;
 
     const visibleOptions = Array.from(openWrapper.querySelectorAll('.select2-option:not([hidden])'));
 
-    if (e.key === 'Escape') {
-      closeAllSelect2();
-      e.preventDefault();
-    } else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
       e.preventDefault();
       if (!visibleOptions.length) return;
       const currentIdx = visibleOptions.findIndex((opt) => opt.classList.contains('highlighted'));
@@ -1361,7 +1500,7 @@
     // Close any open select2 if clicking elsewhere
     closeAllSelect2();
 
-    // Regular buttons
+    // Regular buttons and actions
     const btn = e.target.closest('button') || e.target.closest('[data-action="close-modal"]');
     if (!btn) return;
     const d = btn.dataset;
@@ -1372,6 +1511,9 @@
       if (d.togglePreview === 'a') S.previewOpenA = !S.previewOpenA;
       else if (d.togglePreview === 'b') S.previewOpenB = !S.previewOpenB;
       render();
+    } else if (d.triggerUpload) {
+      const input = $(`#file-input-${d.triggerUpload}`);
+      if (input) input.click();
     } else if (d.addKey) {
       S.keys.push({ a: '', b: '' });
       renderKeyPairs();
@@ -1400,6 +1542,7 @@
       if (S.res?.mismatched && S.res.mismatched[idx]) {
         S.inspectedItem = S.res.mismatched[idx];
         S.inspectedUnmatchedItem = null;
+        S.inspectedAmbiguousItem = null;
         renderResults();
       }
     } else if (d.inspectUnmatched !== undefined) {
@@ -1407,6 +1550,7 @@
       if (S.currentUnmatchedList && S.currentUnmatchedList[idx]) {
         S.inspectedUnmatchedItem = S.currentUnmatchedList[idx];
         S.inspectedItem = null;
+        S.inspectedAmbiguousItem = null;
         renderResults();
       }
     } else if (d.inspectAmbiguous !== undefined) {
@@ -1429,8 +1573,11 @@
     } else if (d.action === 'clear-search') {
       S.searchQuery = '';
       renderResults();
+    } else if (d.action === 'reset-all') {
+      resetAll();
     }
   });
 
+  setupDragAndDrop();
   render();
 })();

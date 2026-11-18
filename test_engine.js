@@ -90,4 +90,32 @@ console.assert(res.mismatched.length === 2, 'Mismatched count mismatch');
 console.assert(res.duplicate.length === 1, 'Duplicate count mismatch');
 console.assert(res.stats.a.ok && res.stats.b.ok, 'Integrity audit must be 100% OK');
 
+// Test Ambiguous Duplicate detection
+const tableAmbA = {
+  sheetName: 'Sheet1',
+  headers: ['ID', 'Date', 'Amount'],
+  rows: [
+    { _excelRow: 2, ID: 'TX100', Date: '2026-01-01', Amount: '100' },
+    { _excelRow: 3, ID: 'TX100', Date: '2026-01-02', Amount: '200' }
+  ]
+};
+const tableAmbB = {
+  sheetName: 'Sheet1',
+  headers: ['ID', 'Date', 'Amount'],
+  rows: [
+    { _excelRow: 2, ID: 'TX100', Date: '2026-01-01', Amount: '150' },
+    { _excelRow: 3, ID: 'TX100', Date: '2026-01-03', Amount: '250' }
+  ]
+};
+const resAmb = ECT.engine.compare(tableAmbA, tableAmbB, {
+  keys: [{ a: 'ID', b: 'ID' }],
+  fields: [{ a: 'Date', b: 'Date' }, { a: 'Amount', b: 'Amount' }],
+  options: { ignoreCase: true, tolerance: 0 }
+});
+console.log('\n--- Ambiguous Test ---');
+console.log('Ambiguous count:', resAmb.ambiguous.length, '(Expected: 1)');
+console.log('Ambiguous reason:', resAmb.ambiguous[0].reason);
+console.assert(resAmb.ambiguous.length === 1, 'Ambiguous record count mismatch');
+console.assert(resAmb.stats.a.ok && resAmb.stats.b.ok, 'Ambiguous integrity must be 100% OK');
+
 console.log('\nAll tests PASSED successfully!');
