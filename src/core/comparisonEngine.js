@@ -219,4 +219,123 @@
   }
 
   ECT.engine = { compare, validate };
+
+  // Modern Enterprise API Adapter for Comparison Engine
+  const comparisonEngine = {
+    autoMapHeaders(headersA = [], headersB = []) {
+      const normalizeStr = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+
+      return headersA.map(colA => {
+        const normA = normalizeStr(colA);
+
+        // 1. Exact match
+        let matched = headersB.find(colB => colB === colA);
+
+        // 2. Case-insensitive match
+        if (!matched) {
+          matched = headersB.find(colB => colB.toLowerCase() === colA.toLowerCase());
+        }
+
+        // 3. Normalized match (without underscores/spaces)
+        if (!matched) {
+          matched = headersB.find(colB => normalizeStr(colB) === normA);
+        }
+
+        // 4. Substring / common acronym match
+        if (!matched) {
+          matched = headersB.find(colB => {
+            const normB = normalizeStr(colB);
+            return (normA.length > 2 && normB.includes(normA)) || (normB.length > 2 && normA.includes(normB));
+          });
+        }
+
+        return {
+          sourceCol: colA,
+          targetCol: matched || '',
+          type: 'auto',
+          ignore: !matched
+        };
+      });
+    },
+
+    compareFiles(dataA, dataB, fullKeyConfig, validMappings) {
+      const headersA = (fullKeyConfig.headersA && fullKeyConfig.headersA.length)
+        ? fullKeyConfig.headersA
+        : (dataA.length > 0 && dataA[0] ? Object.keys(dataA[0]).filter(k => k !== '_excelRow') : []);
+      const headersB = (fullKeyConfig.headersB && fullKeyConfig.headersB.length)
+        ? fullKeyConfig.headersB
+        : (dataB.length > 0 && dataB[0] ? Object.keys(dataB[0]).filter(k => k !== '_excelRow') : []);
+
+      const tblA = { headers: headersA, rows: dataA };
+      const tblB = { headers: headersB, rows: dataB };
+
+      const keys = [
+        { a: fullKeyConfig.fileAKey, b: fullKeyConfig.fileBKey },
+        ...(fullKeyConfig.compositeKeys || []).map(ck => ({ a: ck.colA, b: ck.colB }))
+      ];
+
+      const fields = validMappings.map(m => ({
+        a: m.sourceCol,
+        b: m.targetCol,
+        type: m.type
+      }));
+
+      const res = ECT.engine.compare(tblA, tblB, { keys, fields });
+
+      return {
+        raw: res,
+        matched: res.matched.map(m => ({
+          key: m.key,
+          rowA: m.a[0]?.data,
+          rowB: m.b[0]?.data,
+          a: m.a,
+          b: m.b
+        })),
+        mismatched: res.mismatched.map(m => ({
+          key: m.key,
+          rowA: m.a[0]?.data,
+          rowB: m.b[0]?.data,
+          a: m.a,
+          b: m.b,
+          diffs: m.diffs.map(d => ({
+            field: d.fieldA,
+            valA: d.a,
+            valB: d.b,
+            fieldA: d.fieldA,
+            fieldB: d.fieldB
+          })),
+          allFields: m.allFields
+        })),
+        unmatchedA: res.unmatched.filter(u => u.side === 'a').flatMap(u =>
+          u.rows.map(r => ({ key: u.key, row: r.data, reason: u.reason }))
+        ),
+        unmatchedB: res.unmatched.filter(u => u.side === 'b').flatMap(u =>
+          u.rows.map(r => ({ key: u.key, row: r.data, reason: u.reason }))
+        ),
+        ambiguous: res.ambiguous.map(amb => ({
+          key: amb.key,
+          countA: amb.a.length,
+          countB: amb.b.length,
+          rowsA: amb.a.map(r => r.data),
+          rowsB: amb.b.map(r => r.data),
+          reason: amb.reason
+        })),
+        duplicatesA: res.duplicate.filter(d => d.a.length > 1).map(d => ({
+          key: d.key,
+          count: d.a.length,
+          rows: d.a.map(r => r.data)
+        })),
+        duplicatesB: res.duplicate.filter(d => d.b.length > 1).map(d => ({
+          key: d.key,
+          count: d.b.length,
+          rows: d.b.map(r => r.data)
+        })),
+        stats: res.stats
+      };
+    },
+
+    validate: ECT.engine.validate
+  };
+
+  g.comparisonEngine = ECT.comparisonEngine = comparisonEngine;
 })(typeof window !== 'undefined' ? window : globalThis);

@@ -329,4 +329,147 @@
       X.writeFile(wb, 'Complete_Comparison_Report.xlsx', { cellDates: true });
     }
   };
+
+  // Modern Enterprise API Adapter for Excel Service
+  const excelService = {
+    async parseExcelFile(file) {
+      const X = typeof XLSX !== 'undefined' ? XLSX : g.XLSX;
+      if (!X) throw new Error('SheetJS (XLSX) library is not loaded');
+
+      const wb = await ECT.excel.read(file);
+      const sheetNames = wb.SheetNames || [];
+      if (sheetNames.length === 0) throw new Error('Excel workbook contains no sheets');
+
+      const firstSheet = sheetNames[0];
+      const table = ECT.excel.table(wb, firstSheet, null);
+
+      return {
+        name: file.name,
+        size: file.size,
+        workbook: wb,
+        sheetNames: sheetNames,
+        currentSheet: firstSheet,
+        headers: table.headers || [],
+        data: table.rows || [],
+        detectedHeaderRow: (table.headerRow || 0) + 1,
+        table: table
+      };
+    },
+
+    parseSheetWithHeaderRow(wb, sheetName, headerRow) {
+      const zeroBasedRow = Math.max(0, (headerRow || 1) - 1);
+      const table = ECT.excel.table(wb, sheetName, zeroBasedRow);
+      return {
+        currentSheet: sheetName,
+        headers: table.headers || [],
+        data: table.rows || [],
+        detectedHeaderRow: headerRow,
+        table: table
+      };
+    },
+
+    exportResultsToExcel(comparisonResult, columnMappings, diffsOnly = false) {
+      const X = typeof XLSX !== 'undefined' ? XLSX : g.XLSX;
+      if (!X) throw new Error('SheetJS (XLSX) library is not loaded');
+
+      const wb = X.utils.book_new();
+
+      if (diffsOnly) {
+        // 1. Mismatched Differences Sheet
+        const misAoa = [['Key', 'Differing Column Name', 'File A Value', 'File B Value', 'Status']];
+        (comparisonResult.mismatched || []).forEach(item => {
+          (item.diffs || []).forEach(d => {
+            misAoa.push([
+              item.key,
+              d.field || d.fieldA,
+              d.valA ?? '',
+              d.valB ?? '',
+              'VALUE MISMATCH'
+            ]);
+          });
+        });
+        X.utils.book_append_sheet(wb, X.utils.aoa_to_sheet(misAoa), 'Differences_Only');
+
+        // 2. Unmatched File A
+        if (comparisonResult.unmatchedA?.length) {
+          const unmAoa = [['Key', 'Reason', ...Object.keys(comparisonResult.unmatchedA[0].row || {})]];
+          comparisonResult.unmatchedA.forEach(u => {
+            unmAoa.push([u.key, u.reason || 'Missing in File B', ...Object.values(u.row || {})]);
+          });
+          X.utils.book_append_sheet(wb, X.utils.aoa_to_sheet(unmAoa), 'Missing_in_File_B');
+        }
+
+        // 3. Unmatched File B
+        if (comparisonResult.unmatchedB?.length) {
+          const unmBaoa = [['Key', 'Reason', ...Object.keys(comparisonResult.unmatchedB[0].row || {})]];
+          comparisonResult.unmatchedB.forEach(u => {
+            unmBaoa.push([u.key, u.reason || 'Missing in File A', ...Object.values(u.row || {})]);
+          });
+          X.utils.book_append_sheet(wb, X.utils.aoa_to_sheet(unmBaoa), 'Missing_in_File_A');
+        }
+
+        X.writeFile(wb, 'Differences_Report.xlsx', { cellDates: true });
+      } else {
+        // Complete Summary Report
+        const summaryAoa = [
+          ['Executive Comparison Summary Report'],
+          ['Matched Records', comparisonResult.matched?.length || 0],
+          ['Mismatched Records', comparisonResult.mismatched?.length || 0],
+          ['Missing in File B (Unmatched A)', comparisonResult.unmatchedA?.length || 0],
+          ['Missing in File A (Unmatched B)', comparisonResult.unmatchedB?.length || 0],
+          ['Ambiguous Conflicts', comparisonResult.ambiguous?.length || 0],
+          ['Duplicates', (comparisonResult.duplicatesA?.length || 0) + (comparisonResult.duplicatesB?.length || 0)]
+        ];
+        X.utils.book_append_sheet(wb, X.utils.aoa_to_sheet(summaryAoa), 'Summary');
+
+        // Mismatched
+        const misAoa = [['Key', 'Column Name', 'File A Value', 'File B Value', 'Status']];
+        (comparisonResult.mismatched || []).forEach(item => {
+          (item.diffs || []).forEach(d => {
+            misAoa.push([item.key, d.field || d.fieldA, d.valA ?? '', d.valB ?? '', 'VALUE MISMATCH']);
+          });
+        });
+        X.utils.book_append_sheet(wb, X.utils.aoa_to_sheet(misAoa), 'Mismatched');
+
+        // Matched
+        const matchedAoa = [['Key', 'Status']];
+        (comparisonResult.matched || []).forEach(item => {
+          matchedAoa.push([item.key, 'All Fields Matched']);
+        });
+        X.utils.book_append_sheet(wb, X.utils.aoa_to_sheet(matchedAoa), 'Matched');
+
+        // Unmatched A
+        if (comparisonResult.unmatchedA?.length) {
+          const unmAoa = [['Key', 'Reason', ...Object.keys(comparisonResult.unmatchedA[0].row || {})]];
+          comparisonResult.unmatchedA.forEach(u => {
+            unmAoa.push([u.key, u.reason || 'Missing in File B', ...Object.values(u.row || {})]);
+          });
+          X.utils.book_append_sheet(wb, X.utils.aoa_to_sheet(unmAoa), 'Missing_in_File_B');
+        }
+
+        // Unmatched B
+        if (comparisonResult.unmatchedB?.length) {
+          const unmBaoa = [['Key', 'Reason', ...Object.keys(comparisonResult.unmatchedB[0].row || {})]];
+          comparisonResult.unmatchedB.forEach(u => {
+            unmBaoa.push([u.key, u.reason || 'Missing in File A', ...Object.values(u.row || {})]);
+          });
+          X.utils.book_append_sheet(wb, X.utils.aoa_to_sheet(unmBaoa), 'Missing_in_File_A');
+        }
+
+        // Ambiguous
+        if (comparisonResult.ambiguous?.length) {
+          const ambAoa = [['Key', 'Rows in File A', 'Rows in File B', 'Reason']];
+          comparisonResult.ambiguous.forEach(a => {
+            ambAoa.push([a.key, a.countA, a.countB, a.reason]);
+          });
+          X.utils.book_append_sheet(wb, X.utils.aoa_to_sheet(ambAoa), 'Ambiguous_Conflicts');
+        }
+
+        X.writeFile(wb, 'Complete_Reconciliation_Report.xlsx', { cellDates: true });
+      }
+    }
+  };
+
+  g.excelService = ECT.excelService = excelService;
+  ECT.exportResultsToExcel = excelService.exportResultsToExcel;
 })(typeof window !== 'undefined' ? window : globalThis);

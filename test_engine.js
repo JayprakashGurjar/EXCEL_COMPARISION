@@ -118,4 +118,37 @@ console.log('Ambiguous reason:', resAmb.ambiguous[0].reason);
 console.assert(resAmb.ambiguous.length === 1, 'Ambiguous record count mismatch');
 console.assert(resAmb.stats.a.ok && resAmb.stats.b.ok, 'Ambiguous integrity must be 100% OK');
 
-console.log('\nAll tests PASSED successfully!');
+// Test Modern excelService & comparisonEngine with Untitled / Empty Column Headers
+(async () => {
+  const wbEmpty = XLSX.utils.book_new();
+  const wsEmpty = XLSX.utils.aoa_to_sheet([
+    ['', 'Product', 'Price'],
+    ['SKU01', 'Keyboard', 500],
+    ['SKU02', 'Mouse', 250]
+  ]);
+  XLSX.utils.book_append_sheet(wbEmpty, wsEmpty, 'Inventory');
+  const bufEmpty = XLSX.write(wbEmpty, { type: 'buffer', bookType: 'xlsx' });
+
+  const mockFile = {
+    name: 'Untitled spreadsheet (4) (1).xlsx',
+    size: bufEmpty.length,
+    arrayBuffer: async () => bufEmpty.buffer.slice(bufEmpty.byteOffset, bufEmpty.byteOffset + bufEmpty.byteLength)
+  };
+
+  const parsed = await excelService.parseExcelFile(mockFile);
+  console.log('\n--- Modern Service Untitled Column Test ---');
+  console.log('Parsed headers:', parsed.headers);
+  console.assert(parsed.headers.includes('Column 1'), 'Should auto-generate Column 1');
+  console.assert(parsed.data.length === 2, 'Should have 2 data rows');
+  console.assert(parsed.data[0]['Column 1'] === 'SKU01', 'Row 0 Column 1 should be SKU01');
+
+  const mappings = comparisonEngine.autoMapHeaders(parsed.headers, parsed.headers);
+  const compRes = comparisonEngine.compareFiles(parsed.data, parsed.data, {
+    fileAKey: parsed.headers[0],
+    fileBKey: parsed.headers[0],
+    compositeKeys: []
+  }, mappings);
+  console.assert(compRes.matched.length === 2, 'Should match all 2 rows');
+
+  console.log('\nAll tests PASSED successfully!');
+})();

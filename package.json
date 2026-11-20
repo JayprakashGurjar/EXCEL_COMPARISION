@@ -1,0 +1,31 @@
+{
+  "name": "excel-comparison-tool",
+  "version": "2.0.0",
+  "description": "High-Precision Excel Comparison Tool with React, Material-UI, Bootstrap and SheetJS",
+  "main": "index.html",
+  "scripts": {
+    "start": "npx serve .",
+    "build": "node build.js",
+    "test": "node test_engine.js"
+  },
+  "dependencies": {
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "@mui/material": "^5.15.15",
+    "@mui/icons-material": "^5.15.15",
+    "@emotion/react": "^11.11.4",
+    "@emotion/styled": "^11.11.5",
+    "bootstrap": "^5.3.3",
+    "xlsx": "^0.18.5"
+  },
+  "keywords": [
+    "excel",
+    "comparison",
+    "reconciliation",
+    "react",
+    "material-ui",
+    "bootstrap"
+  ],
+  "author": "",
+  "license": "MIT"
+}
