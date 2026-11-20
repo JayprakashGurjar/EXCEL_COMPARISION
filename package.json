@@ -18,6 +18,10 @@
     "bootstrap": "^5.3.3",
     "xlsx": "^0.18.5"
   },
+  "devDependencies": {
+    "@babel/core": "^7.24.0",
+    "@babel/preset-react": "^7.24.0"
+  },
   "keywords": [
     "excel",
     "comparison",

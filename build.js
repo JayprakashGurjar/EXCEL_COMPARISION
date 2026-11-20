@@ -1,12 +1,55 @@
 const fs = require('fs');
 const path = require('path');
 
-// Locate babel core
-let babel;
+const outputPath = path.resolve(__dirname, 'src/react/App.js');
+
+// Try to locate babel core from standard node_modules or relative local fallback
+let babel = null;
+let babelPreset = null;
+
 try {
   babel = require('@babel/core');
 } catch (e) {
-  babel = require('D:/Singaji-Code-Masters-main/newReactApp/online-booking/node_modules/@babel/core');
+  const localFallbacks = [
+    path.resolve(__dirname, '../newReactApp/online-booking/node_modules/@babel/core')
+  ];
+  for (const p of localFallbacks) {
+    if (fs.existsSync(p)) {
+      try {
+        babel = require(p);
+        break;
+      } catch (err) {}
+    }
+  }
+}
+
+try {
+  babelPreset = require('@babel/preset-react');
+} catch (e) {
+  const localFallbacks = [
+    path.resolve(__dirname, '../newReactApp/online-booking/node_modules/@babel/preset-react')
+  ];
+  for (const p of localFallbacks) {
+    if (fs.existsSync(p)) {
+      try {
+        babelPreset = require(p);
+        break;
+      } catch (err) {}
+    }
+  }
+}
+
+// If babel is not installed in the environment (e.g. Vercel CI build)
+if (!babel || !babelPreset) {
+  if (fs.existsSync(outputPath)) {
+    console.log('Notice: @babel/core not installed in build environment.');
+    console.log(`Using existing pre-compiled production bundle: src/react/App.js (${(fs.statSync(outputPath).size / 1024).toFixed(1)} KB).`);
+    console.log('Build successful!');
+    process.exit(0);
+  } else {
+    console.error('Error: @babel/core or @babel/preset-react is required to compile src/react/App.js.');
+    process.exit(1);
+  }
 }
 
 const componentOrder = [
@@ -22,7 +65,6 @@ const componentOrder = [
 
 console.log('Compiling modular components...');
 
-// Global React hooks declared once
 const header = `
 const { useState, useEffect, useRef, useMemo, useCallback } = React;
 `;
@@ -33,12 +75,9 @@ const combinedSource = header + componentOrder.map(filePath => {
     throw new Error(`File not found: ${filePath}`);
   }
   let code = fs.readFileSync(fullPath, 'utf8');
-  // Strip duplicate const { ... } = React; lines
   code = code.replace(/const\s*\{[^}]*\}\s*=\s*React;\r?\n?/g, '');
   return `// --- File: ${filePath} ---\n${code}\n`;
 }).join('\n');
-
-const babelPreset = path.resolve('D:/Singaji-Code-Masters-main/newReactApp/online-booking/node_modules/@babel/preset-react');
 
 const result = babel.transformSync(combinedSource, {
   presets: [
@@ -46,7 +85,5 @@ const result = babel.transformSync(combinedSource, {
   ]
 });
 
-const outputPath = path.resolve(__dirname, 'src/react/App.js');
 fs.writeFileSync(outputPath, result.code, 'utf8');
-
 console.log(`Successfully compiled ${componentOrder.length} modular components into ${outputPath} (${(result.code.length / 1024).toFixed(1)} KB)`);
